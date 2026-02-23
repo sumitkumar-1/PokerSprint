@@ -90,7 +90,7 @@
       copyBtn.addEventListener("click", async () => {
         const fullUrl = `${window.location.origin}/room/${room.id}`;
         try {
-          await navigator.clipboard.writeText(fullUrl);
+          await copyText(fullUrl);
           copyBtn.textContent = "Copied";
           setTimeout(() => {
             copyBtn.textContent = "Copy";
@@ -125,5 +125,26 @@
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "-";
     return date.toLocaleString();
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.top = "-9999px";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const successful = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (!successful) {
+      throw new Error("Fallback copy failed");
+    }
   }
 })();
