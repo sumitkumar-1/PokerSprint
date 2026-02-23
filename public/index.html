@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Planning Poker</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell center">
+      <section class="card hero">
+        <h1>Planning Poker</h1>
+        <p class="muted">Estimate story points collaboratively in real-time.</p>
+        <div class="actions">
+          <button id="create-room" class="btn btn-primary">Create Room</button>
+          <a href="/rooms" class="btn">Monitor Rooms</a>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Join Existing Room</h2>
+        <form id="quick-join-form">
+          <label for="room-id-input">Room ID</label>
+          <input id="room-id-input" name="roomId" maxlength="6" placeholder="ABC123" required />
+          <button class="btn" type="submit">Go to Room</button>
+        </form>
+      </section>
+    </main>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/main.js"></script>
+  </body>
+  </html>

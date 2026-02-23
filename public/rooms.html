@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Room Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card topbar">
+        <div>
+          <h1>Room Monitor</h1>
+          <p class="muted">
+            Active rooms: <strong id="total-rooms">0</strong> |
+            Last refresh: <span id="last-refresh">-</span>
+          </p>
+        </div>
+        <div class="actions">
+          <a href="/" class="btn">Home</a>
+          <button id="refresh-btn" class="btn btn-primary">Refresh</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div id="monitor-empty" class="muted">No active rooms right now.</div>
+        <table id="monitor-table" class="hidden">
+          <thead>
+            <tr>
+              <th>Room</th>
+              <th>Status</th>
+              <th>Round</th>
+              <th>Participants</th>
+              <th>Creator</th>
+              <th>Admin</th>
+              <th>History</th>
+              <th>Last Active</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="monitor-body"></tbody>
+        </table>
+      </section>
+    </main>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/rooms.js"></script>
+  </body>
+  </html>
