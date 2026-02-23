@@ -1,0 +1,14 @@
+{
+  "name": "planning-poker-workbook",
+  "version": "1.0.0",
+  "description": "Standalone web-based Agile Planning Poker tool",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

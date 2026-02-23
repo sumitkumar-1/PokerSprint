@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Planning Poker Room</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section id="join-panel" class="card">
+        <h1>Join Room <span id="room-label"></span></h1>
+        <form id="join-form">
+          <label for="name-input">Display Name</label>
+          <input id="name-input" name="name" minlength="2" maxlength="30" required />
+          <button class="btn btn-primary" type="submit">Join</button>
+        </form>
+        <p id="join-error" class="error"></p>
+      </section>
+
+      <section id="room-panel" class="grid hidden">
+        <header class="card topbar">
+          <div>
+            <h1>Room <span id="room-id"></span></h1>
+            <p class="muted">
+              Round <span id="round-number">1</span> |
+              Status: <strong id="status-label">Waiting</strong>
+            </p>
+          </div>
+          <div class="actions">
+            <button id="copy-link" class="btn">Copy Link</button>
+            <button id="start-btn" class="btn btn-primary admin-only">Start Estimation</button>
+            <button id="reveal-btn" class="btn admin-only">Reveal</button>
+            <button id="reset-btn" class="btn admin-only">Reset</button>
+          </div>
+        </header>
+
+        <section class="card">
+          <h2>Participants</h2>
+          <ul id="participants" class="chips"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Vote</h2>
+          <p class="muted" id="voting-hint">Waiting for estimation to start.</p>
+          <div id="vote-options" class="vote-grid"></div>
+          <p id="vote-feedback" class="muted"></p>
+        </section>
+
+        <section class="card">
+          <h2>Round Result</h2>
+          <div id="result-grid" class="result-grid"></div>
+          <div id="result-summary" class="result-summary muted"></div>
+        </section>
+
+        <section class="card wide">
+          <h2>History</h2>
+          <div id="history-empty" class="muted">No rounds completed yet.</div>
+          <table id="history-table" class="hidden">
+            <thead>
+              <tr>
+                <th>Round</th>
+                <th>Votes</th>
+                <th>Average</th>
+                <th>Reveal Type</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </section>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/room.js"></script>
+  </body>
+  </html>
