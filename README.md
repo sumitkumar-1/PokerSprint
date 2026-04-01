@@ -10,6 +10,21 @@ Lightweight, real-time planning poker tool for Agile teams with in-memory sessio
 - In-memory room/session state (no database)
 - Docker + docker-compose
 
+## Jira Integration Config
+
+Set these environment variables on the server deployment:
+
+- `JIRA_BASE_URL`
+- `JIRA_DEFAULT_STORY_POINTS_FIELD` (optional, defaults to `customfield_10166`)
+- `JIRA_MOCK_MODE=true` to simulate Jira without a real Jira server
+
+When `JIRA_MOCK_MODE=true`:
+
+- Jira token validation is mocked
+- issue lookup is mocked for issue keys matching `ABC-123` style format
+- story point updates are simulated in memory only
+- `JIRA_BASE_URL` is not required
+
 ## Why this stack
 
 - Single deployment unit: frontend and backend are hosted by the same Node process.

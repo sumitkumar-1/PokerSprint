@@ -29,6 +29,8 @@
           </div>
           <div class="actions">
             <button id="copy-link" class="btn">Copy Link</button>
+            <button id="jira-setup-toggle" class="btn admin-only" type="button">Jira Setup</button>
+            <button id="jira-queue-toggle" class="btn admin-only hidden" type="button">Jira Queue</button>
             <button id="start-btn" class="btn btn-primary admin-only">Start Estimation</button>
             <button id="reveal-btn" class="btn admin-only">Reveal</button>
             <button id="reset-btn" class="btn admin-only">Reset</button>
@@ -38,6 +40,17 @@
         <section class="card">
           <h2>Participants</h2>
           <ul id="participants" class="chips"></ul>
+        </section>
+
+        <section id="current-issue-card" class="card wide issue-banner hidden">
+          <div class="issue-banner-head">
+            <div>
+              <p class="eyebrow">Current Jira Issue</p>
+              <h2 id="current-issue-key">No issue selected</h2>
+              <p id="current-issue-summary" class="muted">Configure Jira and add issues to begin.</p>
+            </div>
+            <div id="current-issue-position" class="issue-pill">0 of 0</div>
+          </div>
         </section>
 
         <section class="card">
@@ -70,6 +83,78 @@
         </section>
       </section>
     </main>
+
+    <div id="jira-confirm-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Confirm Jira Update</p>
+            <h2 id="confirm-issue-key">Issue</h2>
+            <p id="confirm-issue-summary" class="muted"></p>
+          </div>
+        </div>
+        <label for="jira-estimate-select">Story Points</label>
+        <select id="jira-estimate-select"></select>
+        <p id="jira-confirm-feedback" class="muted"></p>
+        <div class="actions">
+          <button id="jira-confirm-btn" class="btn btn-primary" type="button">Update Jira</button>
+          <button id="jira-cancel-btn" class="btn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="jira-setup-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Jira Setup</p>
+            <h2>Room Integration</h2>
+            <p class="muted">Optional. Leave this untouched if the room should run without Jira.</p>
+          </div>
+        </div>
+        <form id="jira-setup-form" class="stack-form">
+          <label for="jira-token-input">Bearer Token</label>
+          <input id="jira-token-input" type="password" autocomplete="off" />
+
+          <label for="jira-field-input">Story Points Field</label>
+          <input id="jira-field-input" type="text" />
+
+          <label for="jira-issues-input">Initial Issue Queue</label>
+          <textarea id="jira-issues-input" rows="6" placeholder="ABC-123&#10;ABC-124"></textarea>
+
+          <p id="jira-form-feedback" class="muted"></p>
+          <div class="actions">
+            <button id="jira-save-btn" class="btn btn-primary" type="submit">Save Jira Setup</button>
+            <button id="jira-update-btn" class="btn" type="button">Update Settings</button>
+            <button id="jira-setup-cancel-btn" class="btn" type="button">Close</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="jira-queue-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-wide">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Jira Queue</p>
+            <h2>Active Estimation Queue</h2>
+            <p id="jira-queue-summary" class="muted">No Jira queue configured yet.</p>
+          </div>
+        </div>
+        <ul id="jira-queue" class="queue-list compact"></ul>
+        <div class="queue-append">
+          <label for="jira-append-input">Add More Issues</label>
+          <textarea id="jira-append-input" rows="3" placeholder="ABC-125&#10;ABC-126"></textarea>
+          <div class="actions">
+            <button id="jira-append-btn" class="btn" type="button">Append Issues</button>
+            <button id="jira-queue-close-btn" class="btn" type="button">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/room.js"></script>

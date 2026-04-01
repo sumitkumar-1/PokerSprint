@@ -11,6 +11,10 @@ const PORT = process.env.PORT || 3000;
 const ROOM_IDLE_TTL_MS = 30 * 60 * 1000;
 const ROOM_CLEANUP_INTERVAL_MS = 60 * 1000;
 const VOTING_OPTIONS = ["1", "2", "3", "5", "8", "13", "21", "?", "☕"];
+const JIRA_MOCK_MODE = String(process.env.JIRA_MOCK_MODE || "").toLowerCase() === "true";
+const JIRA_BASE_URL = (process.env.JIRA_BASE_URL || "").replace(/\/$/, "");
+const JIRA_DEFAULT_STORY_POINTS_FIELD =
+  process.env.JIRA_DEFAULT_STORY_POINTS_FIELD || "customfield_10166";
 
 const rooms = {};
 
@@ -65,8 +69,18 @@ function createRoom(createdByClientId = null) {
     currentRound: 1,
     roundVotes: {},
     history: [],
+    currentIssueKey: null,
+    lastJiraActionStatus: null,
     settings: {
       votingOptions: VOTING_OPTIONS
+    },
+    jira: {
+      enabled: false,
+      token: null,
+      storyPointsFieldId: JIRA_DEFAULT_STORY_POINTS_FIELD,
+      issues: [],
+      currentIssueIndex: 0,
+      lastValidation: null
     },
     createdAt: Date.now(),
     lastActiveAt: Date.now()
@@ -83,6 +97,24 @@ function findParticipantBySocket(room, socketId) {
 }
 
 function roomPublicState(room) {
+  const queueCounts = room.jira.enabled
+    ? room.jira.issues.reduce(
+        (counts, issue) => {
+          counts.total += 1;
+          counts[issue.status] = (counts[issue.status] || 0) + 1;
+          return counts;
+        },
+        { total: 0, pending: 0, estimating: 0, updated: 0, failed: 0 }
+      )
+    : { total: 0, pending: 0, estimating: 0, updated: 0, failed: 0 };
+  const currentIssue =
+    room.jira.enabled && room.jira.issues[room.jira.currentIssueIndex]
+      ? {
+          ...sanitizeIssue(room.jira.issues[room.jira.currentIssueIndex]),
+          position: room.jira.currentIssueIndex + 1,
+          total: room.jira.issues.length
+        }
+      : null;
   return {
     id: room.id,
     adminClientId: room.adminClientId,
@@ -96,7 +128,16 @@ function roomPublicState(room) {
       hasVoted: Boolean(room.roundVotes[p.clientId]),
       vote: room.status === "revealed" ? room.roundVotes[p.clientId] || null : null
     })),
-    history: room.history
+    history: room.history,
+    jira: {
+      jiraConfigured: room.jira.enabled,
+      storyPointsFieldId: room.jira.storyPointsFieldId,
+      queue: room.jira.issues.map(sanitizeIssue),
+      queueCounts,
+      currentIssue,
+      lastValidation: room.jira.lastValidation,
+      lastJiraActionStatus: room.lastJiraActionStatus
+    }
   };
 }
 
@@ -144,6 +185,204 @@ function voteDetailsFromVotes(room, votes) {
   }));
 }
 
+function sanitizeIssue(issue) {
+  return {
+    key: issue.key,
+    summary: issue.summary,
+    status: issue.status,
+    estimatedValue: issue.estimatedValue,
+    updatedAt: issue.updatedAt,
+    error: issue.error || null
+  };
+}
+
+function createMockIssue(issueKey) {
+  return {
+    key: issueKey,
+    summary: `Mock summary for ${issueKey}`,
+    status: "pending",
+    estimatedValue: null,
+    updatedAt: null,
+    error: null
+  };
+}
+
+function ensureJiraConfigured() {
+  if (JIRA_MOCK_MODE) {
+    return;
+  }
+  if (!JIRA_BASE_URL) {
+    throw new Error("JIRA_BASE_URL is not configured on the server.");
+  }
+}
+
+function jiraHeaders(token) {
+  return {
+    Accept: "application/json",
+    Authorization: `Bearer ${token}`
+  };
+}
+
+async function jiraFetch(pathname, token, options = {}) {
+  ensureJiraConfigured();
+  return fetch(`${JIRA_BASE_URL}${pathname}`, {
+    ...options,
+    headers: {
+      ...jiraHeaders(token),
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {})
+    }
+  });
+}
+
+async function parseJiraError(response) {
+  try {
+    const payload = await response.json();
+    if (Array.isArray(payload?.errorMessages) && payload.errorMessages.length) {
+      return payload.errorMessages.join(", ");
+    }
+    if (payload?.errors && Object.keys(payload.errors).length) {
+      return Object.entries(payload.errors)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(", ");
+    }
+  } catch (_error) {
+    return `${response.status} ${response.statusText}`;
+  }
+  return `${response.status} ${response.statusText}`;
+}
+
+function parseIssueKeys(rawIssues) {
+  const issueKeys = String(rawIssues || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim().toUpperCase())
+    .filter(Boolean);
+  const uniqueKeys = [];
+  const seen = new Set();
+  issueKeys.forEach((key) => {
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueKeys.push(key);
+    }
+  });
+  return uniqueKeys;
+}
+
+async function validateJiraToken(token) {
+  if (JIRA_MOCK_MODE) {
+    if (!String(token || "").trim()) {
+      throw new Error("Mock Jira token validation failed: token is required.");
+    }
+    return;
+  }
+  const response = await jiraFetch("/rest/api/2/myself", token);
+  if (!response.ok) {
+    throw new Error(`Jira token validation failed: ${await parseJiraError(response)}`);
+  }
+}
+
+async function validateStoryPointsField(token, fieldId) {
+  if (JIRA_MOCK_MODE) {
+    if (!String(fieldId || "").trim().startsWith("customfield_")) {
+      throw new Error("Mock Jira field validation failed: use a customfield_* id.");
+    }
+    return;
+  }
+  const response = await jiraFetch(`/rest/api/2/field/${fieldId}`, token);
+  if (!response.ok) {
+    throw new Error(`Story points field validation failed: ${await parseJiraError(response)}`);
+  }
+}
+
+async function fetchIssueDetails(token, issueKey) {
+  if (JIRA_MOCK_MODE) {
+    if (!/^[A-Z][A-Z0-9_]+-\d+$/.test(issueKey)) {
+      throw new Error(`Issue ${issueKey} validation failed: invalid mock issue key format.`);
+    }
+    return createMockIssue(issueKey);
+  }
+  const response = await jiraFetch(
+    `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=summary`,
+    token
+  );
+  if (!response.ok) {
+    throw new Error(`Issue ${issueKey} validation failed: ${await parseJiraError(response)}`);
+  }
+  const payload = await response.json();
+  return {
+    key: issueKey,
+    summary: payload?.fields?.summary || "",
+    status: "pending",
+    estimatedValue: null,
+    updatedAt: null,
+    error: null
+  };
+}
+
+async function updateIssueStoryPoints(token, issueKey, fieldId, storyPoints) {
+  if (JIRA_MOCK_MODE) {
+    if (!String(token || "").trim()) {
+      throw new Error("Failed to update mock Jira issue: token is required.");
+    }
+    if (!String(fieldId || "").trim()) {
+      throw new Error("Failed to update mock Jira issue: field id is required.");
+    }
+    if (!Number.isFinite(Number(storyPoints))) {
+      throw new Error("Failed to update mock Jira issue: invalid story point value.");
+    }
+    return;
+  }
+  const response = await jiraFetch(`/rest/api/2/issue/${encodeURIComponent(issueKey)}`, token, {
+    method: "PUT",
+    body: JSON.stringify({
+      fields: {
+        [fieldId]: storyPoints
+      }
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update ${issueKey}: ${await parseJiraError(response)}`);
+  }
+}
+
+function currentQueueIssue(room) {
+  return room.jira.issues[room.jira.currentIssueIndex] || null;
+}
+
+function advanceQueueToNextPending(room) {
+  for (let index = room.jira.currentIssueIndex; index < room.jira.issues.length; index += 1) {
+    if (room.jira.issues[index].status !== "updated") {
+      room.jira.currentIssueIndex = index;
+      return room.jira.issues[index];
+    }
+  }
+  return null;
+}
+
+function estimateSuggestion(room, average) {
+  if (average === null || !Number.isFinite(average)) {
+    return null;
+  }
+  const numericOptions = room.settings.votingOptions
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (!numericOptions.length) {
+    return null;
+  }
+  const rounded = Math.ceil(average);
+  return numericOptions.find((value) => value >= rounded) || numericOptions[numericOptions.length - 1];
+}
+
+function updateCurrentIssueStatus(room, status, patch = {}) {
+  const issue = currentQueueIssue(room);
+  if (!issue) return null;
+  issue.status = status;
+  Object.assign(issue, patch);
+  room.currentIssueKey = issue.key;
+  return issue;
+}
+
 setInterval(() => {
   const now = Date.now();
   let deletedAny = false;
@@ -166,7 +405,11 @@ setInterval(() => {
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
+  res.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    jiraMode: JIRA_MOCK_MODE ? "mock" : "live"
+  });
 });
 
 app.get("/api/rooms", (_req, res) => {
@@ -317,8 +560,27 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (room.jira.enabled) {
+      const currentIssue = currentQueueIssue(room);
+      if (currentIssue?.status === "updated") {
+        room.jira.currentIssueIndex += 1;
+      }
+      const nextIssue = advanceQueueToNextPending(room);
+      if (!nextIssue) {
+        ack?.({ ok: false, error: "No pending Jira issues left to estimate." });
+        return;
+      }
+      room.jira.issues.forEach((issue, index) => {
+        if (index !== room.jira.currentIssueIndex && issue.status === "estimating") {
+          issue.status = "pending";
+        }
+      });
+      updateCurrentIssueStatus(room, "estimating", { error: null });
+    }
+
     room.status = "voting";
     room.roundVotes = {};
+    room.lastJiraActionStatus = null;
     room.lastActiveAt = Date.now();
     ack?.({ ok: true });
     emitRoomState(roomId);
@@ -394,6 +656,231 @@ io.on("connection", (socket) => {
     room.lastActiveAt = Date.now();
     ack?.({ ok: true });
     emitRoomState(roomId);
+  });
+
+  socket.on("jira:setup", async ({ token, storyPointsFieldId, issues }, ack) => {
+    const { roomId, clientId } = socket.data;
+    const room = rooms[roomId];
+    if (!room || !clientId) {
+      ack?.({ ok: false, error: "Room context missing." });
+      return;
+    }
+    if (!isAdmin(room, clientId)) {
+      ack?.({ ok: false, error: "Only admin can configure Jira." });
+      return;
+    }
+    try {
+      ensureJiraConfigured();
+      const normalizedToken = String(token || "").trim();
+      const normalizedField =
+        String(storyPointsFieldId || "").trim() || JIRA_DEFAULT_STORY_POINTS_FIELD;
+      const issueKeys = parseIssueKeys(issues);
+      if (!normalizedToken) {
+        ack?.({ ok: false, error: "Bearer token is required." });
+        return;
+      }
+      if (!issueKeys.length) {
+        ack?.({ ok: false, error: "Add at least one Jira issue key." });
+        return;
+      }
+
+      await validateJiraToken(normalizedToken);
+      await validateStoryPointsField(normalizedToken, normalizedField);
+      const validatedIssues = [];
+      for (const issueKey of issueKeys) {
+        validatedIssues.push(await fetchIssueDetails(normalizedToken, issueKey));
+      }
+
+      room.jira.enabled = true;
+      room.jira.token = normalizedToken;
+      room.jira.storyPointsFieldId = normalizedField;
+      room.jira.issues = validatedIssues;
+      room.jira.currentIssueIndex = 0;
+      room.jira.lastValidation = {
+        success: true,
+        validatedAt: new Date().toISOString()
+      };
+      room.currentIssueKey = validatedIssues[0]?.key || null;
+      room.lastJiraActionStatus = {
+        type: "setup",
+        success: true,
+        message: "Jira setup saved."
+      };
+      ack?.({ ok: true });
+      emitRoomState(roomId);
+    } catch (error) {
+      room.lastJiraActionStatus = {
+        type: "setup",
+        success: false,
+        message: error.message
+      };
+      ack?.({ ok: false, error: error.message });
+      emitRoomState(roomId);
+    }
+  });
+
+  socket.on("jira:update-config", async ({ token, storyPointsFieldId }, ack) => {
+    const { roomId, clientId } = socket.data;
+    const room = rooms[roomId];
+    if (!room || !clientId) {
+      ack?.({ ok: false, error: "Room context missing." });
+      return;
+    }
+    if (!isAdmin(room, clientId)) {
+      ack?.({ ok: false, error: "Only admin can update Jira settings." });
+      return;
+    }
+    if (room.status === "voting") {
+      ack?.({ ok: false, error: "Cannot update Jira settings during an active vote." });
+      return;
+    }
+    try {
+      ensureJiraConfigured();
+      const normalizedToken = String(token || "").trim();
+      const normalizedField =
+        String(storyPointsFieldId || "").trim() || JIRA_DEFAULT_STORY_POINTS_FIELD;
+      if (!normalizedToken) {
+        ack?.({ ok: false, error: "Bearer token is required." });
+        return;
+      }
+      await validateJiraToken(normalizedToken);
+      await validateStoryPointsField(normalizedToken, normalizedField);
+      room.jira.enabled = true;
+      room.jira.token = normalizedToken;
+      room.jira.storyPointsFieldId = normalizedField;
+      room.jira.lastValidation = {
+        success: true,
+        validatedAt: new Date().toISOString()
+      };
+      room.lastJiraActionStatus = {
+        type: "config",
+        success: true,
+        message: "Jira settings updated."
+      };
+      ack?.({ ok: true });
+      emitRoomState(roomId);
+    } catch (error) {
+      room.lastJiraActionStatus = {
+        type: "config",
+        success: false,
+        message: error.message
+      };
+      ack?.({ ok: false, error: error.message });
+      emitRoomState(roomId);
+    }
+  });
+
+  socket.on("jira:append-issues", async ({ issues }, ack) => {
+    const { roomId, clientId } = socket.data;
+    const room = rooms[roomId];
+    if (!room || !clientId) {
+      ack?.({ ok: false, error: "Room context missing." });
+      return;
+    }
+    if (!isAdmin(room, clientId)) {
+      ack?.({ ok: false, error: "Only admin can append Jira issues." });
+      return;
+    }
+    if (!room.jira.enabled || !room.jira.token) {
+      ack?.({ ok: false, error: "Configure Jira before appending issues." });
+      return;
+    }
+    try {
+      const newKeys = parseIssueKeys(issues);
+      if (!newKeys.length) {
+        ack?.({ ok: false, error: "Add at least one Jira issue key to append." });
+        return;
+      }
+      const existingKeys = new Set(room.jira.issues.map((issue) => issue.key));
+      const appendableKeys = newKeys.filter((key) => !existingKeys.has(key));
+      if (!appendableKeys.length) {
+        ack?.({ ok: false, error: "All provided Jira issues are already in the queue." });
+        return;
+      }
+      const appendedIssues = [];
+      for (const issueKey of appendableKeys) {
+        appendedIssues.push(await fetchIssueDetails(room.jira.token, issueKey));
+      }
+      room.jira.issues.push(...appendedIssues);
+      room.lastJiraActionStatus = {
+        type: "append",
+        success: true,
+        message: `${appendedIssues.length} Jira issue(s) appended.`
+      };
+      ack?.({ ok: true });
+      emitRoomState(roomId);
+    } catch (error) {
+      room.lastJiraActionStatus = {
+        type: "append",
+        success: false,
+        message: error.message
+      };
+      ack?.({ ok: false, error: error.message });
+      emitRoomState(roomId);
+    }
+  });
+
+  socket.on("jira:confirm-estimate", async ({ value }, ack) => {
+    const { roomId, clientId } = socket.data;
+    const room = rooms[roomId];
+    if (!room || !clientId) {
+      ack?.({ ok: false, error: "Room context missing." });
+      return;
+    }
+    if (!isAdmin(room, clientId)) {
+      ack?.({ ok: false, error: "Only admin can confirm Jira estimates." });
+      return;
+    }
+    if (!room.jira.enabled || !room.jira.token) {
+      ack?.({ ok: false, error: "Configure Jira before updating story points." });
+      return;
+    }
+    if (room.status !== "revealed") {
+      ack?.({ ok: false, error: "Reveal the round before confirming Jira estimate." });
+      return;
+    }
+    const currentIssue = currentQueueIssue(room);
+    if (!currentIssue) {
+      ack?.({ ok: false, error: "No active Jira issue selected." });
+      return;
+    }
+    const normalizedValue = Number(value);
+    const numericOptions = room.settings.votingOptions
+      .map((option) => Number(option))
+      .filter((option) => Number.isFinite(option));
+    if (!numericOptions.includes(normalizedValue)) {
+      ack?.({ ok: false, error: "Choose a valid numeric story point value." });
+      return;
+    }
+    try {
+      await updateIssueStoryPoints(
+        room.jira.token,
+        currentIssue.key,
+        room.jira.storyPointsFieldId,
+        normalizedValue
+      );
+      updateCurrentIssueStatus(room, "updated", {
+        estimatedValue: normalizedValue,
+        updatedAt: new Date().toISOString(),
+        error: null
+      });
+      room.lastJiraActionStatus = {
+        type: "confirm",
+        success: true,
+        message: `${currentIssue.key} updated to ${normalizedValue} story points.`
+      };
+      ack?.({ ok: true });
+      emitRoomState(roomId);
+    } catch (error) {
+      updateCurrentIssueStatus(room, "failed", { error: error.message });
+      room.lastJiraActionStatus = {
+        type: "confirm",
+        success: false,
+        message: error.message
+      };
+      ack?.({ ok: false, error: error.message });
+      emitRoomState(roomId);
+    }
   });
 
   socket.on("disconnect", () => {
