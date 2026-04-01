@@ -549,7 +549,9 @@
 
   function handleJiraAck(response, successMessage) {
     if (!response?.ok) {
-      ui.jiraFormFeedback.textContent = response?.error || "Jira action failed.";
+      const errorMessage = response?.error || "Jira action failed.";
+      ui.jiraFormFeedback.textContent = errorMessage;
+      ui.voteFeedback.textContent = errorMessage;
       return;
     }
     ui.jiraFormFeedback.textContent = "";

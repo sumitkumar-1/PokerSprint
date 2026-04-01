@@ -288,9 +288,20 @@ async function validateStoryPointsField(token, fieldId) {
     }
     return;
   }
-  const response = await jiraFetch(`/rest/api/2/field/${fieldId}`, token);
+  const response = await jiraFetch("/rest/api/2/field", token);
   if (!response.ok) {
-    throw new Error(`Story points field validation failed: ${await parseJiraError(response)}`);
+    throw new Error(
+      `Story points field validation failed while loading field metadata: ${await parseJiraError(response)}`
+    );
+  }
+  const payload = await response.json();
+  const matchedField = Array.isArray(payload)
+    ? payload.find((field) => field?.id === fieldId)
+    : null;
+  if (!matchedField) {
+    throw new Error(
+      `Story points field validation failed: ${fieldId} was not found in Jira field metadata.`
+    );
   }
 }
 
@@ -709,6 +720,7 @@ io.on("connection", (socket) => {
       ack?.({ ok: true });
       emitRoomState(roomId);
     } catch (error) {
+      console.error(`[jira:setup] room=${roomId} field=${storyPointsFieldId || ""} error=${error.message}`);
       room.lastJiraActionStatus = {
         type: "setup",
         success: false,
@@ -760,6 +772,9 @@ io.on("connection", (socket) => {
       ack?.({ ok: true });
       emitRoomState(roomId);
     } catch (error) {
+      console.error(
+        `[jira:update-config] room=${roomId} field=${storyPointsFieldId || ""} error=${error.message}`
+      );
       room.lastJiraActionStatus = {
         type: "config",
         success: false,
@@ -810,6 +825,7 @@ io.on("connection", (socket) => {
       ack?.({ ok: true });
       emitRoomState(roomId);
     } catch (error) {
+      console.error(`[jira:append-issues] room=${roomId} error=${error.message}`);
       room.lastJiraActionStatus = {
         type: "append",
         success: false,
@@ -872,6 +888,9 @@ io.on("connection", (socket) => {
       ack?.({ ok: true });
       emitRoomState(roomId);
     } catch (error) {
+      console.error(
+        `[jira:confirm-estimate] room=${roomId} issue=${currentIssue.key} value=${value} error=${error.message}`
+      );
       updateCurrentIssueStatus(room, "failed", { error: error.message });
       room.lastJiraActionStatus = {
         type: "confirm",
